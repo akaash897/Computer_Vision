@@ -4,8 +4,8 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D, UpSampling2D, LeakyReLU, BatchNormalization, Input
-from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Conv2D, UpSampling2D, LeakyReLU, BatchNormalization, Input #type:ignore
+from tensorflow.keras.models import Model #type:ignore
 import time
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
@@ -85,20 +85,52 @@ class EnhancementMethods:
         """Apply wavelet-based sharpening to enhance image details"""
         img_float = image.astype(np.float32)
 
-        if len(img_float.shape) == 3:
-            r, g, b = cv2.split(img_float)
-            r_coeffs = pywt.dwt2(r, 'haar')
-            g_coeffs = pywt.dwt2(g, 'haar')
-            b_coeffs = pywt.dwt2(b, 'haar')
-            r_sharp = pywt.idwt2((r_coeffs[0], (r_coeffs[1][0]*1.5, r_coeffs[1][1]*1.5, r_coeffs[1][2]*1.5)), 'haar')
-            g_sharp = pywt.idwt2((g_coeffs[0], (g_coeffs[1][0]*1.5, g_coeffs[1][1]*1.5, g_coeffs[1][2]*1.5)), 'haar')
-            b_sharp = pywt.idwt2((b_coeffs[0], (b_coeffs[1][0]*1.5, b_coeffs[1][1]*1.5, b_coeffs[1][2]*1.5)), 'haar')
-            sharpened = cv2.merge([r_sharp, g_sharp, b_sharp])
-        else:
-            coeffs = pywt.dwt2(img_float, 'haar')
-            sharpened = pywt.idwt2((coeffs[0], (coeffs[1][0]*1.5, coeffs[1][1]*1.5, coeffs[1][2]*1.5)), 'haar')
+        try:
+            if len(img_float.shape) == 3:
+                r, g, b = cv2.split(img_float)
+                result_channels = []
+                
+                for channel in [r, g, b]:
+                    try:
+                        coeffs = pywt.dwt2(channel, 'haar')
+                        # Apply safety check before multiplication
+                        detail_coeffs = list(coeffs[1])
+                        for i in range(len(detail_coeffs)):
+                            detail_coeffs[i] = np.nan_to_num(detail_coeffs[i] * 1.5, nan=0.0)
+                        
+                        sharp_channel = pywt.idwt2((coeffs[0], tuple(detail_coeffs)), 'haar')
+                        # Handle potential size mismatch
+                        if sharp_channel.shape != channel.shape:
+                            sharp_channel = cv2.resize(sharp_channel, (channel.shape[1], channel.shape[0]))
+                        
+                        result_channels.append(sharp_channel)
+                    except Exception as e:
+                        # Fallback if wavelet transform fails
+                        result_channels.append(channel)
+                
+                sharpened = cv2.merge(result_channels)
+            else:
+                try:
+                    coeffs = pywt.dwt2(img_float, 'haar')
+                    detail_coeffs = list(coeffs[1])
+                    for i in range(len(detail_coeffs)):
+                        detail_coeffs[i] = np.nan_to_num(detail_coeffs[i] * 1.5, nan=0.0)
+                    
+                    sharpened = pywt.idwt2((coeffs[0], tuple(detail_coeffs)), 'haar')
+                    # Handle potential size mismatch
+                    if sharpened.shape != img_float.shape:
+                        sharpened = cv2.resize(sharpened, (img_float.shape[1], img_float.shape[0]))
+                except Exception as e:
+                    # Fallback if wavelet transform fails
+                    sharpened = img_float
 
-        return np.clip(sharpened, 0, 255).astype(np.uint8)
+            # Final safety check for invalid values
+            sharpened = np.nan_to_num(sharpened, nan=0.0, posinf=255.0, neginf=0.0)
+            return np.clip(sharpened, 0, 255).astype(np.uint8)
+            
+        except Exception as e:
+            # Ultimate fallback
+            return image
 
     @staticmethod
     def wiener_filter(image, kernel_size=(5, 5)):
@@ -164,7 +196,10 @@ class EvaluationMetrics:
     @staticmethod
     def calculate_psnr(img1, img2):
         """Calculate Peak Signal-to-Noise Ratio"""
-        return psnr(img1, img2)
+        # Ensure both images have the same dtype
+        img1 = img1.astype(np.float32)
+        img2 = img2.astype(np.float32)
+        return psnr(img1, img2, data_range=1.0)
 
     @staticmethod
     def calculate_ssim(img1, img2):
@@ -257,10 +292,12 @@ def process_image(lr_img, method_name, model=None):
         return None
         
     try:
+        result = None
+        
         if method_name == "Bicubic":
-            return InterpolationMethods.bicubic(lr_img, scale=SCALE_FACTOR)
+            result = InterpolationMethods.bicubic(lr_img, scale=SCALE_FACTOR)
         elif method_name == "Lanczos":
-            return InterpolationMethods.lanczos(lr_img, scale=SCALE_FACTOR)
+            result = InterpolationMethods.lanczos(lr_img, scale=SCALE_FACTOR)
         elif method_name == "Super-Resolution":
             if model is None:
                 st.error("Super-Resolution model not loaded")
@@ -274,22 +311,22 @@ def process_image(lr_img, method_name, model=None):
                 return None
                 
             sr_img = model.predict(lr_batch)[0]
-            return np.clip(sr_img, 0, 1)
+            result = sr_img
         elif method_name == "Wavelet":
             upscaled = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
             img_uint8 = (upscaled * 255).astype(np.uint8)
             enhanced = EnhancementMethods.wavelet_sharpening(img_uint8)
-            return enhanced.astype(np.float32) / 255.0
+            result = enhanced.astype(np.float32) / 255.0
         elif method_name == "Wiener":
             upscaled = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
             img_uint8 = (upscaled * 255).astype(np.uint8)
             enhanced = EnhancementMethods.wiener_filter(img_uint8)
-            return enhanced.astype(np.float32) / 255.0
+            result = enhanced.astype(np.float32) / 255.0
         elif method_name == "Laplacian":
             upscaled = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
             img_uint8 = (upscaled * 255).astype(np.uint8)
             enhanced = EnhancementMethods.laplacian_sharpening(img_uint8)
-            return enhanced.astype(np.float32) / 255.0
+            result = enhanced.astype(np.float32) / 255.0
         elif method_name == "Wavelet-SR":
             if model is None:
                 st.error("Super-Resolution model not loaded")
@@ -298,9 +335,7 @@ def process_image(lr_img, method_name, model=None):
             # First get the SR result
             lr_batch = np.expand_dims(lr_img, axis=0)
             sr_img = model.predict(lr_batch)[0]
-            sr_img = np.clip(sr_img, 0, 1)
-            # Then apply wavelet sharpening
-            return EnhancementMethods.wavelet_sr_hybrid(sr_img)
+            result = EnhancementMethods.wavelet_sr_hybrid(sr_img)
         elif method_name == "Wiener-SR":
             if model is None:
                 st.error("Super-Resolution model not loaded")
@@ -309,9 +344,7 @@ def process_image(lr_img, method_name, model=None):
             # First get the SR result
             lr_batch = np.expand_dims(lr_img, axis=0)
             sr_img = model.predict(lr_batch)[0]
-            sr_img = np.clip(sr_img, 0, 1)
-            # Then apply wiener filter
-            return EnhancementMethods.wiener_sr_hybrid(sr_img)
+            result = EnhancementMethods.wiener_sr_hybrid(sr_img)
         elif method_name == "Laplacian-SR":
             if model is None:
                 st.error("Super-Resolution model not loaded")
@@ -320,26 +353,61 @@ def process_image(lr_img, method_name, model=None):
             # First get the SR result
             lr_batch = np.expand_dims(lr_img, axis=0)
             sr_img = model.predict(lr_batch)[0]
-            sr_img = np.clip(sr_img, 0, 1)
-            # Then apply laplacian sharpening
-            return EnhancementMethods.laplacian_sr_hybrid(sr_img)
+            result = EnhancementMethods.laplacian_sr_hybrid(sr_img)
         else:
             st.error(f"Unknown method: {method_name}")
             return None
+        
+        # Ensure the result is properly clipped to valid range
+        if result is not None:
+            # Check for NaN or Inf values
+            if np.isnan(result).any() or np.isinf(result).any():
+                st.warning(f"Method {method_name} produced NaN or Inf values. Fixing...")
+                result = np.nan_to_num(result, nan=0.0, posinf=1.0, neginf=0.0)
+            
+            # Ensure values are in [0,1] range
+            result = np.clip(result, 0, 1)
+            
+        return result
     
     except Exception as e:
         st.error(f"Error processing image with {method_name}: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 def calculate_metrics(enhanced_img, hr_img):
     """Calculate image quality metrics"""
     try:
+        # Ensure both images have the same shape
+        if enhanced_img.shape != hr_img.shape:
+            st.warning("Images have different shapes. Resizing for comparison.")
+            enhanced_img = cv2.resize(enhanced_img, (hr_img.shape[1], hr_img.shape[0]))
+        
+        # Ensure both images have the same datatype
+        enhanced_img = enhanced_img.astype(np.float32)
+        hr_img = hr_img.astype(np.float32)
+        
+        # Check for NaN or Inf values
+        if np.isnan(enhanced_img).any() or np.isnan(hr_img).any() or np.isinf(enhanced_img).any() or np.isinf(hr_img).any():
+            st.warning("Images contain NaN or Inf values. Fixing for metrics calculation.")
+            enhanced_img = np.nan_to_num(enhanced_img, nan=0.0, posinf=1.0, neginf=0.0)
+            hr_img = np.nan_to_num(hr_img, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        # Ensure values are in [0,1] range
+        enhanced_img = np.clip(enhanced_img, 0, 1)
+        hr_img = np.clip(hr_img, 0, 1)
+        
+        # Calculate metrics
         ssim_val = EvaluationMetrics.calculate_ssim(enhanced_img, hr_img)
         psnr_val = EvaluationMetrics.calculate_psnr(enhanced_img, hr_img)
         mse_val = EvaluationMetrics.calculate_mse(enhanced_img, hr_img)
+        
         return ssim_val, psnr_val, mse_val
     except Exception as e:
         st.error(f"Error calculating metrics: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return 0, 0, 0
 
 def convert_to_displayable(image):
@@ -348,13 +416,34 @@ def convert_to_displayable(image):
         if image is None:
             return None
             
-        if image.max() <= 1.0:
+        # First ensure we're working with a numpy array
+        if not isinstance(image, np.ndarray):
+            st.error("Image is not a numpy array")
+            return None
+        
+        # Check if image has NaN or inf values
+        if np.isnan(image).any() or np.isinf(image).any():
+            st.warning("Image contains NaN or inf values. Fixing...")
+            image = np.nan_to_num(image, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        # Convert to correct format depending on range
+        if image.max() <= 1.0 and image.min() >= 0.0:
+            # Already in [0,1] range, convert to uint8
             image = (image * 255).astype(np.uint8)
+        elif image.max() <= 255.0 and image.min() >= 0.0:
+            # Already in [0,255] range, just convert to uint8
+            image = image.astype(np.uint8)
+        else:
+            # Normalize to [0,1] range, then convert to uint8
+            image = image - image.min()
+            if image.max() > 0:  # Avoid division by zero
+                image = image / image.max()
+            image = (image * 255).astype(np.uint8)
+            
         return image
     except Exception as e:
         st.error(f"Error converting image: {str(e)}")
         return None
-
 # Main Streamlit app
 def main():
     st.title("Image Enhancement and Super-Resolution App")
@@ -409,22 +498,30 @@ def main():
     
     # Initialize or load model if needed
     sr_model = None
-    model_path = "sr_model.h5"
-    if "Super-Resolution" in selected_method:
-        if os.path.exists(model_path):
-            with st.spinner("Loading Super-Resolution model..."):
-                try:
-                    sr_model = tf.keras.models.load_model(model_path)
-                except Exception as e:
-                    st.error(f"Error loading model: {str(e)}")
-                    st.warning("Building a new model instead...")
+    # New line: use your trained model file
+    trained_model_path = "sr_model_x2.keras"
+
+    # Check if any method requires the SR model
+    if any(sr_method in selected_method for sr_method in ["Super-Resolution", "Wavelet-SR", "Wiener-SR", "Laplacian-SR"]):
+        with st.spinner("Loading Super-Resolution model..."):
+            try:
+                # Try to load the pre-trained model first
+                if os.path.exists(trained_model_path):
+                    st.info(f"Using pre-trained model: {trained_model_path}")
+                    sr_model = tf.keras.models.load_model(trained_model_path)
+                # Fall back to other options if trained model doesn't exist
+                elif os.path.exists("sr_model.h5"):
+                    sr_model = tf.keras.models.load_model("sr_model.h5")
+                else:
+                    st.warning("No pre-trained model found. Building a new untrained model instead.")
                     sr_model = SuperResolutionModel.build_generator(scale_factor=SCALE_FACTOR)
                     sr_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002), loss="mse")
-        else:
-            with st.spinner("Building Super-Resolution model..."):
+                    st.info("Note: For best results, a trained model is recommended.")
+            except Exception as e:
+                st.error(f"Error loading model: {str(e)}")
+                st.warning("Building a new model instead...")
                 sr_model = SuperResolutionModel.build_generator(scale_factor=SCALE_FACTOR)
                 sr_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002), loss="mse")
-                st.info("Note: In a real application, you would train the model on your dataset. Here we're just using the untrained model for demonstration.")
     
     # Process button
     if st.sidebar.button("Process Image"):
@@ -446,15 +543,15 @@ def main():
                 with col1:
                     st.subheader("Low Resolution Input")
                     resized_lr = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
-                    st.image(convert_to_displayable(resized_lr), use_column_width=True)
+                    st.image(convert_to_displayable(resized_lr), use_container_width=True)
                 
                 with col2:
                     st.subheader("High Resolution Ground Truth")
-                    st.image(convert_to_displayable(hr_img), use_column_width=True)
+                    st.image(convert_to_displayable(hr_img), use_container_width=True)
                 
                 with col3:
                     st.subheader(f"Enhanced with {selected_method}")
-                    st.image(convert_to_displayable(enhanced_img), use_column_width=True)
+                    st.image(convert_to_displayable(enhanced_img), use_container_width=True)
                 
                 # Display metrics
                 st.subheader("Image Quality Metrics")
@@ -474,9 +571,15 @@ def main():
                 
                 # Show image difference map
                 st.subheader("Difference Map")
-                diff_map = np.abs(hr_img - enhanced_img) * 3
-                diff_map = np.clip(diff_map, 0, 1)
-                st.image(convert_to_displayable(diff_map), use_column_width=True)
+                diff_map = np.abs(hr_img - enhanced_img) * 3  # This multiplication by 3 might cause values > 1.0
+                diff_map = np.clip(diff_map, 0, 1)  # Ensure values are in [0,1] range
+
+                # Check for invalid values again
+                if np.isnan(diff_map).any() or np.isinf(diff_map).any():
+                    st.warning("Difference map contains invalid values. Fixing...")
+                    diff_map = np.nan_to_num(diff_map, nan=0.0, posinf=1.0, neginf=0.0)
+
+                st.image(convert_to_displayable(diff_map), use_container_width=True)
                 
                 # Option to download enhanced image
                 buffered = io.BytesIO()
@@ -495,12 +598,12 @@ def main():
         
         with col1:
             st.subheader("Original Image")
-            st.image(original_img, use_column_width=True)
+            st.image(original_img, use_container_width=True)
         
         with col2:
             st.subheader("Low Resolution Version")
             resized_lr = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
-            st.image(convert_to_displayable(resized_lr), use_column_width=True)
+            st.image(convert_to_displayable(resized_lr), use_container_width=True)
             
         st.info("👆 Select an enhancement method and click 'Process Image' to see the enhanced result.")
 
@@ -514,7 +617,7 @@ def main():
         - **Lanczos**: Lanczos resampling for high-quality upscaling
         
         #### Deep Learning:
-        - **Super-Resolution**: Neural network-based super-resolution
+        - **Super-Resolution**: Neural network-based super-resolution using a pre-trained model
         
         #### Sharpening Methods:
         - **Wavelet**: Wavelet-based image sharpening
@@ -525,6 +628,24 @@ def main():
         - **Wavelet-SR**: Combined wavelet sharpening with super-resolution
         - **Wiener-SR**: Combined Wiener filter with super-resolution
         - **Laplacian-SR**: Combined Laplacian sharpening with super-resolution
+        """)
+        
+    # Add info about the pre-trained model
+    with st.expander("About the Pre-trained SR Model"):
+        st.markdown("""
+        This application uses a pre-trained super-resolution model (`sr_model_x2.keras`) for all 
+        super-resolution related methods. This model has been specifically trained to upscale images 
+        by a factor of 2x while preserving and enhancing details.
+        
+        The model architecture uses a deep convolutional neural network with residual connections 
+        to maintain image fidelity while adding details that might have been lost in the 
+        lower-resolution version.
+        
+        For best results, use one of the SR-based methods:
+        - **Super-Resolution**: Uses the pre-trained model directly
+        - **Wavelet-SR**: Combines SR with wavelet sharpening for enhanced details
+        - **Wiener-SR**: Combines SR with Wiener filtering for noise reduction
+        - **Laplacian-SR**: Combines SR with Laplacian sharpening for edge enhancement
         """)
 
 if __name__ == "__main__":
