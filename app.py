@@ -154,20 +154,6 @@ class EnhancementMethods:
             deblurred = safe_wiener(image)
 
         return deblurred
-        
-    @staticmethod
-    def laplacian_sharpening(image, alpha=0.5):
-        """Apply Laplacian-based sharpening"""
-        if len(image.shape) == 3:
-            lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-            l, a, b = cv2.split(lab)
-            laplacian = cv2.Laplacian(l, cv2.CV_64F)
-            sharpened_l = np.clip(l - alpha * laplacian, 0, 255).astype(np.uint8)
-            enhanced_lab = cv2.merge([sharpened_l, a, b])
-            return cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
-        else:
-            laplacian = cv2.Laplacian(image, cv2.CV_64F)
-            return np.clip(image - alpha * laplacian, 0, 255).astype(np.uint8)
 
     @staticmethod
     def wavelet_sr_hybrid(sr_image):
@@ -182,13 +168,6 @@ class EnhancementMethods:
         img_uint8 = (sr_image * 255).astype(np.uint8)
         deblurred = EnhancementMethods.wiener_filter(img_uint8)
         return deblurred.astype(np.float32) / 255.0
-
-    @staticmethod
-    def laplacian_sr_hybrid(sr_image):
-        """Combine Super-Resolution with Laplacian Sharpening"""
-        img_uint8 = (sr_image * 255).astype(np.uint8)
-        sharpened = EnhancementMethods.laplacian_sharpening(img_uint8)
-        return sharpened.astype(np.float32) / 255.0
 
 class EvaluationMetrics:
     """Methods to evaluate image enhancement quality"""
@@ -298,7 +277,7 @@ def process_image(lr_img, method_name, model=None):
             result = InterpolationMethods.bicubic(lr_img, scale=SCALE_FACTOR)
         elif method_name == "Lanczos":
             result = InterpolationMethods.lanczos(lr_img, scale=SCALE_FACTOR)
-        elif method_name == "Super-Resolution":
+        elif method_name == "CNN-SR":
             if model is None:
                 st.error("Super-Resolution model not loaded")
                 return None
@@ -322,11 +301,6 @@ def process_image(lr_img, method_name, model=None):
             img_uint8 = (upscaled * 255).astype(np.uint8)
             enhanced = EnhancementMethods.wiener_filter(img_uint8)
             result = enhanced.astype(np.float32) / 255.0
-        elif method_name == "Laplacian":
-            upscaled = cv2.resize(lr_img, (HR_SIZE, HR_SIZE))
-            img_uint8 = (upscaled * 255).astype(np.uint8)
-            enhanced = EnhancementMethods.laplacian_sharpening(img_uint8)
-            result = enhanced.astype(np.float32) / 255.0
         elif method_name == "Wavelet-SR":
             if model is None:
                 st.error("Super-Resolution model not loaded")
@@ -345,15 +319,6 @@ def process_image(lr_img, method_name, model=None):
             lr_batch = np.expand_dims(lr_img, axis=0)
             sr_img = model.predict(lr_batch)[0]
             result = EnhancementMethods.wiener_sr_hybrid(sr_img)
-        elif method_name == "Laplacian-SR":
-            if model is None:
-                st.error("Super-Resolution model not loaded")
-                return None
-            
-            # First get the SR result
-            lr_batch = np.expand_dims(lr_img, axis=0)
-            sr_img = model.predict(lr_batch)[0]
-            result = EnhancementMethods.laplacian_sr_hybrid(sr_img)
         else:
             st.error(f"Unknown method: {method_name}")
             return None
@@ -444,9 +409,47 @@ def convert_to_displayable(image):
     except Exception as e:
         st.error(f"Error converting image: {str(e)}")
         return None
+
 # Main Streamlit app
 def main():
     st.title("Image Enhancement and Super-Resolution App")
+    
+    # Added info about the methods at the top
+    with st.expander("About the Enhancement Methods", expanded=True):
+        st.markdown("""
+        ### Available Enhancement Methods:
+        
+        #### Deep Learning:
+        - **CNN-SR**: Neural network-based super-resolution using a pre-trained model
+        - **Wavelet-SR**: Combined wavelet sharpening with super-resolution
+        - **Wiener-SR**: Combined Wiener filter with super-resolution
+        
+        #### Traditional Methods:
+        - **Bicubic**: Standard bicubic interpolation for upscaling
+        - **Lanczos**: Lanczos resampling for high-quality upscaling
+        
+        #### Sharpening Methods:
+        - **Wavelet**: Wavelet-based image sharpening
+        - **Wiener**: Wiener filter for image restoration
+        """)
+        
+    # Add info about the pre-trained model at the top
+    with st.expander("About the Pre-trained SR Model", expanded=True):
+        st.markdown("""
+        This application uses a pre-trained super-resolution model (`sr_model_x2.keras`) for all 
+        super-resolution related methods. This model has been specifically trained to upscale images 
+        by a factor of 2x while preserving and enhancing details.
+        
+        The model architecture uses a deep convolutional neural network with residual connections 
+        to maintain image fidelity while adding details that might have been lost in the 
+        lower-resolution version.
+        
+        For best results, use one of the SR-based methods:
+        - **CNN-SR**: Uses the pre-trained model directly
+        - **Wavelet-SR**: Combines SR with wavelet sharpening for enhanced details
+        - **Wiener-SR**: Combines SR with Wiener filtering for noise reduction
+        """)
+    
     st.sidebar.header("Settings")
     
     # Verify dataset structure and update path if needed
@@ -480,12 +483,12 @@ def main():
     selected_image = st.sidebar.selectbox("Select Image", image_files)
     image_path = os.path.join(category_path, selected_image)
     
-    # Select enhancement method
+    # Select enhancement method - reordered to put SR methods first
     st.sidebar.subheader("Enhancement Method")
     method_names = [
-        "Bicubic", "Lanczos", "Super-Resolution",
-        "Wavelet", "Wiener", "Laplacian",
-        "Wavelet-SR", "Wiener-SR", "Laplacian-SR"
+        "CNN-SR", "Wavelet-SR", "Wiener-SR",  # Super-resolution methods first
+        "Bicubic", "Lanczos",                 # Traditional methods
+        "Wavelet", "Wiener"                   # Sharpening methods
     ]
     selected_method = st.sidebar.selectbox("Select Method", method_names)
     
@@ -502,7 +505,7 @@ def main():
     trained_model_path = "sr_model_x2.keras"
 
     # Check if any method requires the SR model
-    if any(sr_method in selected_method for sr_method in ["Super-Resolution", "Wavelet-SR", "Wiener-SR", "Laplacian-SR"]):
+    if any(sr_method in selected_method for sr_method in ["CNN-SR", "Wavelet-SR", "Wiener-SR"]):
         with st.spinner("Loading Super-Resolution model..."):
             try:
                 # Try to load the pre-trained model first
@@ -531,10 +534,7 @@ def main():
             processing_time = time.time() - start_time
             
             if enhanced_img is not None:
-                # Calculate metrics
-                ssim_val, psnr_val, mse_val = calculate_metrics(enhanced_img, hr_img)
-                
-                # Display images and metrics
+                # Display images only (no metrics)
                 st.header("Results")
                 
                 # Create three columns for the images
@@ -553,21 +553,8 @@ def main():
                     st.subheader(f"Enhanced with {selected_method}")
                     st.image(convert_to_displayable(enhanced_img), use_container_width=True)
                 
-                # Display metrics
-                st.subheader("Image Quality Metrics")
-                metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
-                
-                with metrics_col1:
-                    st.metric("SSIM", f"{ssim_val:.4f}")
-                
-                with metrics_col2:
-                    st.metric("PSNR (dB)", f"{psnr_val:.2f}")
-                
-                with metrics_col3:
-                    st.metric("MSE", f"{mse_val:.6f}")
-                
-                with metrics_col4:
-                    st.metric("Processing Time (s)", f"{processing_time:.3f}")
+                # Show processing time only
+                st.info(f"Processing Time: {processing_time:.3f} seconds")
                 
                 # Show image difference map
                 st.subheader("Difference Map")
@@ -606,47 +593,6 @@ def main():
             st.image(convert_to_displayable(resized_lr), use_container_width=True)
             
         st.info("👆 Select an enhancement method and click 'Process Image' to see the enhanced result.")
-
-    # Add info about the methods
-    with st.expander("About the Enhancement Methods"):
-        st.markdown("""
-        ### Available Enhancement Methods:
-        
-        #### Traditional Methods:
-        - **Bicubic**: Standard bicubic interpolation for upscaling
-        - **Lanczos**: Lanczos resampling for high-quality upscaling
-        
-        #### Deep Learning:
-        - **Super-Resolution**: Neural network-based super-resolution using a pre-trained model
-        
-        #### Sharpening Methods:
-        - **Wavelet**: Wavelet-based image sharpening
-        - **Wiener**: Wiener filter for image restoration
-        - **Laplacian**: Laplacian sharpening for edge enhancement
-        
-        #### Hybrid Methods:
-        - **Wavelet-SR**: Combined wavelet sharpening with super-resolution
-        - **Wiener-SR**: Combined Wiener filter with super-resolution
-        - **Laplacian-SR**: Combined Laplacian sharpening with super-resolution
-        """)
-        
-    # Add info about the pre-trained model
-    with st.expander("About the Pre-trained SR Model"):
-        st.markdown("""
-        This application uses a pre-trained super-resolution model (`sr_model_x2.keras`) for all 
-        super-resolution related methods. This model has been specifically trained to upscale images 
-        by a factor of 2x while preserving and enhancing details.
-        
-        The model architecture uses a deep convolutional neural network with residual connections 
-        to maintain image fidelity while adding details that might have been lost in the 
-        lower-resolution version.
-        
-        For best results, use one of the SR-based methods:
-        - **Super-Resolution**: Uses the pre-trained model directly
-        - **Wavelet-SR**: Combines SR with wavelet sharpening for enhanced details
-        - **Wiener-SR**: Combines SR with Wiener filtering for noise reduction
-        - **Laplacian-SR**: Combines SR with Laplacian sharpening for edge enhancement
-        """)
 
 if __name__ == "__main__":
     main()
