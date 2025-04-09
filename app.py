@@ -412,7 +412,7 @@ def convert_to_displayable(image):
 
 # Main Streamlit app
 def main():
-    st.title("Image Enhancement and Super-Resolution App")
+    st.title("Comparative Assessment of Resolution Enhancement Models for Satellite Images")
     
     # Added info about the methods at the top
     with st.expander("About the Enhancement Methods", expanded=True):
