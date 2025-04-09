@@ -19,8 +19,6 @@ This project compares various resolution enhancement techniques for satellite im
   - Hybrid methods: Wavelet-SR, Wiener-SR
 - Quantitative evaluation metrics: **PSNR**, **SSIM**, **MSE**
 - Interactive web app for real-time comparisons
-- Supports multi-resolution scaling: **2×, 4×, 8×**
-
 ---
 
 ## 📦 Dataset
