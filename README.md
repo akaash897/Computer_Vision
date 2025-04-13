@@ -47,7 +47,6 @@ We use the **UC Merced Land Use** dataset with 10 selected categories and 100 im
    - HR: 256×256
    - LR: 128×128 (2× downsampling + Gaussian blur)
 3. Normalize pixel values to [0, 1]
-4. Build multi-resolution datasets for testing
 
 ### 🧠 Enhancement Approaches
 
