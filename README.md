@@ -46,7 +46,7 @@ We use the **UC Merced Land Use** dataset with 10 selected categories and 100 im
 2. Generate LR-HR image pairs:
    - HR: 256×256
    - LR: 128×128 (2× downsampling + Gaussian blur)
-3. Normalize pixel values to [0, 1]
+
 
 ### 🧠 Enhancement Approaches
 
