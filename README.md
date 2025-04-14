@@ -3,7 +3,7 @@
 ## Comparative Assessment of Resolution Enhancement Models for Satellite Images
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://m24cse002-m24cse032-m24cse030-m24csa023.streamlit.app/)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1QwP7Iwlwbxg8fQDnciDQw19lr9tbaVI?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1QwP7Iwlwbxg8fQDnciDQ_w19lr9tbaVI?usp=sharing)
 
 This project compares various resolution enhancement techniques for satellite imagery using the UC Merced Land Use dataset. It includes traditional interpolation methods, deep learning-based super-resolution models, and novel hybrid approaches.
 
