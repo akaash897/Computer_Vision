@@ -122,7 +122,7 @@ Built with:
 ## 🔗 Links
 
 - 🚀 [Streamlit Deployment](https://m24cse002-m24cse032-m24cse030-m24csa023.streamlit.app/)
-- 📓 [Colab Notebook](https://colab.research.google.com/drive/1QwP7Iwlwbxg8fQDnciDQw19lr9tbaVI?usp=sharing)
+- 📓 [Colab Notebook](https://colab.research.google.com/drive/1QwP7Iwlwbxg8fQDnciDQ_w19lr9tbaVI#scrollTo=UY_QBQOrIYq1)
 
 ---
 
